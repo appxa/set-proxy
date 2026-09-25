@@ -7,6 +7,10 @@ Browser proxy switcher extensions. Two builds are included:
 
 Both support SOCKS5 / HTTP / HTTPS proxies and free-proxy scanning. The Firefox build also includes `gen_icons.py` for regenerating toolbar icons.
 
+![set-proxy screenshot 1](389056.png)
+
+![set-proxy screenshot 2](389059.png)
+
 ## Install
 
 ### Firefox
