@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #212121;
+    --panel: #2f2f2f;
+    --border: #424242;
+    --text: #ececec;
+    --muted: #9e9e9e;
+    --accent: #3b82f6;
+    --ok: #4ade80;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    padding: 24px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  #summary .sub { margin-bottom: 0; margin-top: 4px; }
+
+  /* country grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+  }
+  .country {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color .15s, background .15s;
+  }
+  .country:hover { border-color: var(--accent); background: #333; }
+  .country .flag { font-size: 18px; }
+  .country img.flag { width: 24px; height: 16px; object-fit: cover; border-radius: 2px; }
+  .country .cc { font-weight: 600; }
+  .country .count { color: var(--muted); font-size: 11px; margin-left: auto; }
+
+  /* testing view */
+  .test-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .test-header h2 { font-size: 16px; }
+  .back {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .back:hover { background: #333; }
+  .stop { border-color: var(--bad); color: var(--bad); }
+  .stop:hover { background: #3b2525; }
+
+  .notice {
+    background: var(--panel);
+    border: 1px solid var(--bad);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--bad);
+  }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width .3s;
+  }
+
+  .test-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .test-row .icon { width: 20px; text-align: center; }
+  .test-row .type { color: var(--muted); font-size: 11px; text-transform: uppercase; width: 50px; }
+  .test-row .addr { flex: 1; font-family: monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .test-row .result { font-size: 12px; min-width: 60px; text-align: right; }
+  .test-row .result.ok { color: var(--ok); }
+  .test-row .result.bad { color: var(--bad); }
+  .test-row .result.testing { color: var(--muted); }
+
+  .summary {
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .summary .big { font-size: 18px; font-weight: 600; }
+  #summary .ok-text { color: var(--ok); }
+
+  .loading { text-align: center; color: var(--muted); padding: 40px; }
+  .error { color: var(--bad); }
+
+  textarea {
+    width: 100%;
+    background: #1c1c1c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    font: 13px/1.5 "Consolas", monospace;
+    outline: none;
+    resize: vertical;
+  }
+  textarea:focus { border-color: var(--accent); }
+</style>
+</head>
+<body>
+  <div id="countriesView">
+    <div class="notice">
+      Chrome cannot route a single test request through a proxy, so a scan
+      switches the whole browser to each proxy in turn. Browsing will be
+      interrupted while a scan runs.
+    </div>
+    <div class="grid" id="countryGrid"></div>
+  </div>
+
+  <div id="customView" style="display:none">
+    <div class="test-header">
+      <button class="back" id="customBack">&larr; Back</button>
+      <h2>Custom list</h2>
+    </div>
+    <textarea id="customInput" rows="10" placeholder="One proxy per line:
+1.2.3.4:1080
+socks5://5.6.7.8:1080
+http://9.10.11.12:8080
+https://13.14.15.16:443"></textarea>
+    <div style="margin-top:8px">
+      <select id="customType" class="back" style="width:auto;display:inline-block">
+        <option value="socks">SOCKS5 (default)</option>
+        <option value="http">HTTP</option>
+        <option value="https">HTTPS</option>
+      </select>
+      <button id="customScan" class="back" style="display:inline-block">Scan</button>
+    </div>
+    <div id="customMsg" class="msg" style="margin-top:6px"></div>
+  </div>
+
+  <div id="testView" style="display:none">
+    <div class="test-header">
+      <button class="back" id="backBtn">&larr; Back</button>
+      <h2 id="countryTitle"></h2>
+      <button class="back stop" id="stopBtn" style="display:none;margin-left:auto">Stop scan</button>
+    </div>
+    <div class="progress-bar"><div class="fill" id="progressFill" style="width:0"></div></div>
+    <div id="summary"></div>
+    <div id="testList"></div>
+  </div>
+
+  <script src="freeproxy.js"></script>
+</body>
+</html>

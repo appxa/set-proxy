@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #212121;
+    --panel: #2f2f2f;
+    --border: #424242;
+    --text: #ececec;
+    --muted: #9e9e9e;
+    --accent: #3b82f6;
+    --ok: #4ade80;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 340px;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+    padding: 12px;
+    border-radius: 16px;
+    box-shadow: inset 0 0 0 1px var(--border);
+    overflow: hidden;
+  }
+
+  .card-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+
+  select, input {
+    width: 100%;
+    background: #1c1c1c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: 12px/1.3 "Segoe UI", system-ui, sans-serif;
+    outline: none;
+    margin-top: 6px;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+
+  .row { display: flex; gap: 6px; }
+  .row > * { flex: 1; }
+  .row-2-1 select { flex: 2; }
+  .row-2-1 input { flex: 1; }
+
+  /* toggle switch */
+  .switch { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
+  .switch input { display: none; }
+  .switch .track {
+    position: absolute; inset: 0;
+    background: #1c1c1c;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .switch .track::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 14px; height: 14px;
+    background: var(--muted);
+    border-radius: 50%;
+    transition: transform .15s, background .15s;
+  }
+  .switch input:checked + .track { background: var(--ok); border-color: var(--ok); }
+  .switch input:checked + .track::after { transform: translateX(18px); background: #fff; }
+
+  .active-ping { font-size: 11px; margin-left: auto; margin-right: 5px; color: var(--muted); }
+  .active-ping.ok { color: var(--ok); }
+  .active-ping.bad { color: var(--bad); }
+
+  .actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  button {
+    flex: 1;
+    min-width: 70px;
+    background: #1c1c1c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button:hover { background: #262626; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #2f6fe0; }
+
+  .msg { font-size: 11px; margin-top: 4px; color: var(--muted); }
+  .msg.ok { color: var(--ok); }
+  .msg.bad { color: var(--bad); }
+
+  .note { font-size: 10.5px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+
+  #list { margin-top: 10px; max-height: 260px; overflow-y: auto; }
+  .proxy {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #1c1c1c;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 9px;
+    margin-bottom: 6px;
+  }
+  .proxy.active { border-color: var(--accent); }
+  .proxy input[type="radio"] { width: auto; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+  .proxy .type { color: var(--muted); font-size: 10px; text-transform: uppercase; flex-shrink: 0; }
+  .proxy .ping { font-size: 10.5px; flex-shrink: 0; min-width: 34px; color: var(--muted); }
+  .proxy .ping.ok { color: var(--ok); }
+  .proxy .ping.bad { color: var(--bad); }
+  .proxy .addr { flex: 1; font: 12px monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proxy button { flex: none; padding: 3px 7px; font-size: 11px; min-width: 0; }
+  .empty { font-size: 12px; color: var(--muted); text-align: center; padding: 10px 0; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="card-title">
+    <span>Set proxy</span>
+    <span class="active-ping" id="activePing"></span>
+    <label class="switch">
+      <input type="checkbox" id="proxyToggle">
+      <span class="track"></span>
+    </label>
+  </div>
+
+  <select id="proxyType">
+    <option value="socks">SOCKS5</option>
+    <option value="http">HTTP</option>
+    <option value="https">HTTPS</option>
+  </select>
+
+  <div class="row" id="hostPortRow">
+    <input id="proxyHost" placeholder="host, e.g. 1.2.3.4">
+    <input id="proxyPort" placeholder="port" style="max-width:80px">
+  </div>
+
+  <div class="actions">
+    <button id="proxyAdd">Add</button>
+    <button id="freeProxy">Free Proxy</button>
+  </div>
+  <div class="msg" id="proxyMsg"></div>
+
+  <div id="list"></div>
+
+  <div style="margin-top:4px; display:flex; gap:6px">
+    <button id="testAll">Test all</button>
+    <button id="delAll" style="flex:none; min-width:0">Delete all</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

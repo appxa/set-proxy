@@ -1,1 +1,3 @@
-*.zip
+# packaged copies — regenerate from firefox/ and chrome/
+set-proxy-firefox.zip
+set-proxy-chrome.zip
