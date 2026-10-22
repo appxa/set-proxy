@@ -1,9 +1,28 @@
 "use strict";
 
-const PROXIFLY_URL =
-  "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.json";
-const IPLOCATE_BASE =
-  "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/countries/";
+/*
+ * Sources:
+ *  - proxifly meta/data.json  -> small file with per-country proxy counts
+ *  - proxifly countries/<CC>/data.txt -> one "proto://ip:port" per line
+ *  - iplocate countries/<CC>/proxies.txt -> same format, second source
+ *
+ * The old "proxies/all/data.json" is ~21 MB and is rejected by jsDelivr
+ * ("File size exceeded the configured limit of 20 MB"), which made the
+ * response body non-JSON. We therefore only pull the small meta file plus
+ * the single country file that the user actually clicks.
+ */
+const PROXIFLY_META = [
+  "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/meta/data.json",
+  "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/meta/data.json",
+];
+const PROXIFLY_COUNTRY = [
+  "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/",
+  "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/countries/",
+];
+const IPLOCATE_BASE = [
+  "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/countries/",
+  "https://cdn.jsdelivr.net/gh/iplocate/free-proxy-list@main/countries/",
+];
 
 let countryMap = {};
 let scanStopped = false;
@@ -54,20 +73,42 @@ function parseIpLocate(text) {
   return out;
 }
 
+/* ---- fetch helpers ---- */
+/* try each url in order, return the first non-empty body */
+async function fetchText(urls) {
+  let lastErr = new Error("no source");
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, { cache: "no-store" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const text = await resp.text();
+      if (!text.trim()) throw new Error("empty response");
+      return text;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 /* ---- load & render country list ---- */
 async function loadCountries() {
   try {
-    const resp = await fetch(PROXIFLY_URL, { cache: "no-store" });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const data = await resp.json();
-    if (!Array.isArray(data)) throw new Error("unexpected response");
+    const text = await fetchText(PROXIFLY_META);
+    let meta;
+    try {
+      meta = JSON.parse(text);
+    } catch (e) {
+      throw new Error("source did not return JSON");
+    }
+    const totals = (meta && meta.totals && meta.totals.countries) || null;
+    if (!totals) throw new Error("unexpected response");
 
     countryMap = {};
-    for (const p of data) {
-      const cc = (p.geolocation && p.geolocation.country || "??").toUpperCase();
-      if (cc === "??" || !p.ip) continue;
-      if (!countryMap[cc]) countryMap[cc] = [];
-      countryMap[cc].push(p);
+    for (const cc of Object.keys(totals)) {
+      const n = totals[cc] || 0;
+      if (!n) continue;
+      countryMap[cc.toUpperCase()] = { count: n };
     }
     renderCountries();
   } catch (e) {
@@ -90,7 +131,7 @@ function renderCountries() {
     btn.append(
       el("span", "flag", flag(cc)),
       el("span", "cc", cc),
-      el("span", "count", String(countryMap[cc].length))
+      el("span", "count", String(countryMap[cc].count))
     );
     btn.onclick = () => selectCountry(cc);
     grid.appendChild(btn);
@@ -109,16 +150,18 @@ function renderCountries() {
 
 /* ---- select country → fetch + test + add ---- */
 async function selectCountry(cc) {
-  /* 1. proxifly proxies for this country (already in memory) */
-  const proxiflyProxies = (countryMap[cc] || [])
-    .map((p) => ({ type: mapType(p.protocol), host: p.ip, port: String(p.port) }))
-    .filter((p) => p.type);
+  /* 1. proxifly proxies for this country */
+  let proxiflyProxies = [];
+  try {
+    const text = await fetchText(PROXIFLY_COUNTRY.map((b) => b + cc + "/data.txt"));
+    proxiflyProxies = parseIpLocate(text);
+  } catch (e) { /* network error — try the second source anyway */ }
 
   /* 2. iplocate proxies for this country */
   let iplocateProxies = [];
   try {
-    const resp = await fetch(IPLOCATE_BASE + cc + "/proxies.txt", { cache: "no-store" });
-    if (resp.ok) iplocateProxies = parseIpLocate(await resp.text());
+    const text = await fetchText(IPLOCATE_BASE.map((b) => b + cc + "/proxies.txt"));
+    iplocateProxies = parseIpLocate(text);
   } catch (e) { /* 404 or network — ignore */ }
 
   /* 3. combine + deduplicate */
