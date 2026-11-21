@@ -1,7 +1,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-let state = { proxies: [], activeId: null, proxyOn: false, pingResults: {} };
+let state = { proxies: [], activeId: null, proxyOn: false, autoChange: false, autoChangeTimeout: 30000, pingTimeout: 10000, bypass: [], pingResults: {} };
 // Ping cells for the currently rendered rows, keyed by proxy id.
 const pingEls = new Map();
 
@@ -55,9 +55,111 @@ $("proxyToggle").onchange = async (e) => {
   state = res;
   // Probe only on explicit toggle, not on every render — a probe is a real
   // network request with a 10s timeout.
-  if (state.proxyOn) refreshActivePing();
+  if (state.proxyOn) {
+    refreshActivePing();
+    if (state.autoChange) runAutoChangeSearch();
+  }
   else setActivePing("");
   if (res.error) setMsg($("proxyMsg"), res.error, "bad");
+};
+
+// One auto-switch attempt is bounded by AUTOCHANGE_TIMEOUT; a timed-out probe
+// is treated as a failure so the search moves on instead of hanging forever.
+const AUTOCHANGE_TIMEOUT = 30000;
+
+function testWithTimeout(id, deadline) {
+  const ms = Math.max(0, deadline - Date.now());
+  if (ms <= 0) return Promise.resolve({ ok: false, error: "timeout" });
+  return Promise.race([
+    send({ cmd: "testProxy", id }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]).catch(() => ({ ok: false, error: "timeout" }));
+}
+
+// Checks the active proxy and switches to the first working one.
+async function runAutoChangeSearch() {
+  if (!state.autoChange) return;
+  if (!state.proxyOn || !state.activeId) return setActivePing("");
+
+  const deadline = Date.now() + (state.autoChangeTimeout || AUTOCHANGE_TIMEOUT);
+  const tP = await testWithTimeout(state.activeId, deadline);
+  if (tP.ok) return refreshActivePing();
+
+  setActivePing("searching for a working proxy...");
+  for (const chosen of state.proxies) {
+    const r = await testWithTimeout(chosen.id, deadline);
+    if (r.ok) {
+      state = await send({ cmd: "selectProxy", id: chosen.id });
+      render();
+      // Bring the newly selected proxy into view.
+      const rows = document.querySelectorAll("#list .proxy");
+      for (const row of rows) {
+        if (row.classList.contains("active")) row.scrollIntoView({ block: "nearest" });
+      }
+      if (state.proxyOn) refreshActivePing();
+      break;
+    }
+  }
+}
+
+$("autoChangeToggle").onchange = async (e) => {
+  const res = await send({ cmd: "setAutoChangeOn", on: e.target.checked });
+  state = res;
+  if (res.error) setMsg($("proxyMsg"), res.error, "bad");
+  if (!state.autoChange) return;
+  if (e.target.checked) runAutoChangeSearch();
+};
+
+$("autoChangeTimeout").onchange = async (e) => {
+  const ms = Number(e.target.value);
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  state = await send({ cmd: "setAutoChangeTimeout", ms });
+};
+
+$("pingTimeout").onchange = async (e) => {
+  const ms = Number(e.target.value);
+  if (!Number.isFinite(ms) || ms < 100) return;
+  state = await send({ cmd: "setPingTimeout", ms });
+};
+
+// ---- bypass list ----
+function renderBypass() {
+  const list = $("bypassList");
+  list.innerHTML = "";
+  const hosts = state.bypass || [];
+  if (!hosts.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No bypass hosts.";
+    list.appendChild(empty);
+    return;
+  }
+  for (const h of hosts) {
+    const div = document.createElement("div");
+    div.className = "proxy";
+    const addr = document.createElement("span");
+    addr.className = "addr";
+    addr.textContent = h;
+    addr.title = h;
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    delBtn.onclick = async () => {
+      const res = await send({ cmd: "removeBypass", host: h });
+      state = res;
+      renderBypass();
+    };
+    div.append(addr, delBtn);
+    list.appendChild(div);
+  }
+}
+
+$("bypassAdd").onclick = async () => {
+  const host = $("bypassHost").value.trim();
+  if (!host) return;
+  const res = await send({ cmd: "addBypass", host });
+  state = res;
+  $("bypassHost").value = "";
+  renderBypass();
 };
 
 function setActivePing(text, kind) {
@@ -70,9 +172,13 @@ async function refreshActivePing() {
   if (!state.proxyOn || !state.activeId) return setActivePing("");
   setActivePing("...");
   const id = state.activeId;
+  const rowEl = pingEls.get(id);
   const r = await send({ cmd: "testProxy", id });
   // The popup may have been toggled off or reselected while we waited.
   if (!state.proxyOn || state.activeId !== id) return;
+  // Keep the row-level latency/status in sync with the fresh result — it may
+  // have been showing a stale cached value from before an AutoChange switch.
+  if (rowEl) showResult(rowEl, r);
   if (r.ok) setActivePing(r.ms + " ms", "ok");
   else setActivePing(shortErr(r.error), "bad");
 }
@@ -97,6 +203,11 @@ function showResult(el, r) {
 
 function render() {
   $("proxyToggle").checked = !!state.proxyOn;
+  $("autoChangeToggle").checked = !!state.autoChange;
+  const timeoutEl = $("autoChangeTimeout");
+  if (timeoutEl) timeoutEl.value = String(state.autoChangeTimeout || 30000);
+  const pingTimeoutEl = $("pingTimeout");
+  if (pingTimeoutEl) pingTimeoutEl.value = String(state.pingTimeout || 10000);
   pingEls.clear();
 
   const list = $("list");
@@ -122,7 +233,10 @@ function render() {
       const res = await send({ cmd: "selectProxy", id: p.id });
       state = res;
       render();
-      if (state.proxyOn) refreshActivePing();
+      if (state.proxyOn) {
+        refreshActivePing();
+        if (state.autoChange) runAutoChangeSearch();
+      }
       if (res.error) setMsg($("proxyMsg"), res.error, "bad");
     };
 
@@ -133,10 +247,10 @@ function render() {
     const ping = document.createElement("span");
     ping.className = "ping";
     pingEls.set(p.id, ping);
-    // Cached from a previous probe or from the free-proxy scan; re-probing
-    // only happens on an explicit Test.
-    const cached = state.pingResults && state.pingResults[p.id];
-    if (cached) showResult(ping, cached);
+    // No cache: latency/status indicators are shown only from fresh probes,
+    // so they can never go stale or show false values.
+    ping.className = "ping";
+    ping.textContent = "";
 
     const addr = document.createElement("span");
     addr.className = "addr";
@@ -207,6 +321,7 @@ send({ cmd: "getState" }).then((s) => {
   state = s;
   clearForm();
   render();
+  renderBypass();
   if (s.proxyError) setMsg($("proxyMsg"), "Proxy error: " + shortErr(s.proxyError), "bad");
   if (state.proxyOn && state.activeId) refreshActivePing();
 });
